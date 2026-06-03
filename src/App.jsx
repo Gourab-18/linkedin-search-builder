@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import Papa from 'papaparse'
 
 const RECRUITER_ROLES = [
@@ -12,11 +12,46 @@ const RECRUITER_ROLES = [
   'Talent Partner',
 ]
 
-const GROK_PROMPT = (companyName) =>
+const CATEGORY_MAP = {
+  'ML Engineer': 'ML/AI',
+  'AI Engineer': 'ML/AI',
+  'RAG Engineer': 'ML/AI',
+  'MLOps Engineer': 'ML/AI',
+  'Backend Engineer': 'Backend',
+  'Java Developer': 'Backend',
+  'SDE-1': 'Backend',
+  'SDE-2': 'Backend',
+  'Senior Software Engineer': 'Backend',
+  'Full Stack Engineer': 'Full Stack',
+  'Data Scientist': 'Data',
+  'Data Engineer': 'Data',
+  'Recruiter': 'Recruiter',
+  'Technical Recruiter': 'Recruiter',
+  'Talent Acquisition': 'Recruiter',
+  'Campus Recruiter': 'Recruiter',
+  'Sourcer': 'Recruiter',
+  'HR': 'Recruiter',
+  'People Operations': 'Recruiter',
+  'Talent Partner': 'Recruiter',
+  'Engineering Manager': 'Management',
+  'Product Manager': 'Management',
+}
+
+const CATEGORIES = ['All', 'ML/AI', 'Backend', 'Full Stack', 'Data', 'Recruiter', 'Management', 'Custom']
+
+const ROLES_PROMPT = (companyName) =>
   `Given the company '${companyName}', suggest 12-15 relevant job roles that likely exist there. Focus on: Full Stack Engineer, Java Developer, Backend Engineer, ML Engineer, Data Scientist, RAG Engineer, AI Engineer, MLOps Engineer, Data Engineer, Product Manager, Engineering Manager, SDE-1, SDE-2, Senior Software Engineer, and any domain-specific roles relevant to this company. Return ONLY a JSON array of simple role title strings (no company name, no extra text). No explanation.`
+
+const INTEL_PROMPT = (companyName) =>
+  `In exactly 2 lines, what does ${companyName} do? Be specific about their product, tech stack if known, and industry.`
 
 function generateSearchString(company, role) {
   return `"${role}" "${company}"`
+}
+
+function linkedInUrl(company, role) {
+  const q = encodeURIComponent(`"${role}" "${company}"`)
+  return `https://www.linkedin.com/search/results/people/?keywords=${q}`
 }
 
 function getFromLS(key, fallback) {
@@ -34,6 +69,10 @@ function saveToLS(key, value) {
   } catch {}
 }
 
+function getCategory(role) {
+  return CATEGORY_MAP[role] || 'Other'
+}
+
 export default function App() {
   const [csvData, setCsvData] = useState(null)
   const [columns, setColumns] = useState([])
@@ -44,18 +83,24 @@ export default function App() {
   // Persisted state
   const [grokApiKey, setGrokApiKey] = useState(() => getFromLS('grok_api_key', ''))
   const [companyRoles, setCompanyRoles] = useState(() => getFromLS('company_roles_cache', {}))
+  const [companyIntel, setCompanyIntel] = useState(() => getFromLS('company_intel_cache', {}))
+  const [customRoles, setCustomRoles] = useState(() => getFromLS('custom_roles_cache', {}))
   const [darkMode, setDarkMode] = useState(() => getFromLS('dark_mode', true))
 
   const [loadingAI, setLoadingAI] = useState(false)
+  const [loadingIntel, setLoadingIntel] = useState(false)
   const [copiedStr, setCopiedStr] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [aiError, setAiError] = useState('')
   const [companyFilter, setCompanyFilter] = useState('')
   const [showApiKey, setShowApiKey] = useState(false)
+  const [activeCategory, setActiveCategory] = useState('All')
+  const [customRoleInput, setCustomRoleInput] = useState('')
 
-  // Persist on change
   useEffect(() => saveToLS('grok_api_key', grokApiKey), [grokApiKey])
   useEffect(() => saveToLS('company_roles_cache', companyRoles), [companyRoles])
+  useEffect(() => saveToLS('company_intel_cache', companyIntel), [companyIntel])
+  useEffect(() => saveToLS('custom_roles_cache', customRoles), [customRoles])
   useEffect(() => saveToLS('dark_mode', darkMode), [darkMode])
 
   const handleFile = useCallback((file) => {
@@ -88,39 +133,35 @@ export default function App() {
     setSelectedCompany(null)
   }
 
+  const groqCall = async (prompt) => {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${grokApiKey}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7
+      })
+    })
+    const data = await response.json()
+    if (data.error) throw new Error(data.error.message)
+    return data.choices[0].message.content.trim()
+  }
+
   const fetchRoles = async (company) => {
-    if (!grokApiKey) {
-      setAiError('Enter your Groq API key in settings above.')
-      return
-    }
-    if (companyRoles[company]) return // already cached
+    if (!grokApiKey) { setAiError('Enter your Groq API key in settings above.'); return }
+    if (companyRoles[company]) return
     setLoadingAI(true)
     setAiError('')
     try {
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${grokApiKey}`
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [{ role: 'user', content: GROK_PROMPT(company) }],
-          temperature: 0.7
-        })
-      })
-      const data = await response.json()
-      if (data.error) throw new Error(data.error.message)
-      const content = data.choices[0].message.content.trim()
-      // Extract JSON array even if wrapped in markdown
+      const content = await groqCall(ROLES_PROMPT(company))
       const match = content.match(/\[[\s\S]*\]/)
       if (!match) throw new Error('Could not parse roles from AI response')
       const parsed = JSON.parse(match[0])
-      setCompanyRoles(prev => {
-        const updated = { ...prev, [company]: parsed }
-        saveToLS('company_roles_cache', updated)
-        return updated
-      })
+      setCompanyRoles(prev => ({ ...prev, [company]: parsed }))
     } catch (err) {
       setAiError(`AI error: ${err.message}`)
     } finally {
@@ -128,11 +169,26 @@ export default function App() {
     }
   }
 
+  const fetchIntel = async (company) => {
+    if (!grokApiKey || companyIntel[company]) return
+    setLoadingIntel(true)
+    try {
+      const content = await groqCall(INTEL_PROMPT(company))
+      setCompanyIntel(prev => ({ ...prev, [company]: content }))
+    } catch {
+      // silently skip intel errors
+    } finally {
+      setLoadingIntel(false)
+    }
+  }
+
   const handleSelectCompany = (company) => {
     setSelectedCompany(company)
     setAiError('')
-    if (!companyRoles[company] && grokApiKey) {
-      fetchRoles(company)
+    setActiveCategory('All')
+    if (grokApiKey) {
+      if (!companyRoles[company]) fetchRoles(company)
+      if (!companyIntel[company]) fetchIntel(company)
     }
   }
 
@@ -144,9 +200,10 @@ export default function App() {
   }
 
   const copyAll = () => {
-    const roleList = companyRoles[selectedCompany] || []
-    if (!roleList.length) return
-    const all = [...RECRUITER_ROLES, ...roleList]
+    const aiRoles = companyRoles[selectedCompany] || []
+    const custom = customRoles[selectedCompany] || []
+    if (!aiRoles.length && !custom.length) return
+    const all = [...RECRUITER_ROLES, ...aiRoles, ...custom]
       .map(role => generateSearchString(selectedCompany, role))
       .join('\n')
     navigator.clipboard.writeText(all).then(() => {
@@ -160,10 +217,26 @@ export default function App() {
     setCompanyRoles(prev => {
       const updated = { ...prev }
       delete updated[selectedCompany]
-      saveToLS('company_roles_cache', updated)
       return updated
     })
     fetchRoles(selectedCompany)
+  }
+
+  const addCustomRole = () => {
+    const role = customRoleInput.trim()
+    if (!role || !selectedCompany) return
+    setCustomRoles(prev => ({
+      ...prev,
+      [selectedCompany]: [...(prev[selectedCompany] || []), role]
+    }))
+    setCustomRoleInput('')
+  }
+
+  const removeCustomRole = (company, role) => {
+    setCustomRoles(prev => ({
+      ...prev,
+      [company]: (prev[company] || []).filter(r => r !== role)
+    }))
   }
 
   const filteredCompanies = companies.filter(c =>
@@ -171,7 +244,19 @@ export default function App() {
   )
 
   const aiRoles = selectedCompany ? (companyRoles[selectedCompany] || []) : []
-  const roleList = selectedCompany ? [...RECRUITER_ROLES, ...aiRoles] : []
+  const customRoleList = selectedCompany ? (customRoles[selectedCompany] || []) : []
+
+  const allRoles = selectedCompany
+    ? [
+        ...RECRUITER_ROLES.map(r => ({ role: r, category: 'Recruiter', custom: false })),
+        ...aiRoles.map(r => ({ role: r, category: getCategory(r), custom: false })),
+        ...customRoleList.map(r => ({ role: r, category: 'Custom', custom: true })),
+      ]
+    : []
+
+  const visibleRoles = activeCategory === 'All'
+    ? allRoles
+    : allRoles.filter(r => r.category === activeCategory)
 
   // Theme classes
   const t = darkMode ? {
@@ -189,6 +274,9 @@ export default function App() {
     header: 'bg-gray-900 border-gray-800',
     uploadBorder: dragOver ? 'border-blue-400 bg-blue-950/20' : 'border-gray-700 hover:border-gray-500 bg-gray-900/50',
     tag: 'bg-gray-800 text-gray-300',
+    intel: 'bg-blue-950/30 border-blue-800/50 text-blue-300',
+    filterBtn: 'bg-gray-800 text-gray-400 hover:bg-gray-700',
+    filterActive: 'bg-blue-600 text-white',
   } : {
     bg: 'bg-gray-50',
     sidebar: 'bg-white border-gray-200',
@@ -204,6 +292,9 @@ export default function App() {
     header: 'bg-white border-gray-200',
     uploadBorder: dragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-gray-400 bg-gray-50',
     tag: 'bg-gray-100 text-gray-600',
+    intel: 'bg-blue-50 border-blue-200 text-blue-800',
+    filterBtn: 'bg-gray-100 text-gray-600 hover:bg-gray-200',
+    filterActive: 'bg-blue-600 text-white',
   }
 
   return (
@@ -356,17 +447,17 @@ export default function App() {
           {selectedCompany && (
             <div>
               {/* Company Header */}
-              <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
+              <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
                 <div>
                   <h2 className="text-2xl font-bold">{selectedCompany}</h2>
                   <p className={`text-sm ${t.subtext} mt-0.5`}>
                     {loadingAI
                       ? 'Fetching AI-suggested roles...'
                       : aiRoles.length > 0
-                        ? `${RECRUITER_ROLES.length} recruiter + ${aiRoles.length} role search strings`
+                        ? `${RECRUITER_ROLES.length} recruiter + ${aiRoles.length} AI + ${customRoleList.length} custom`
                         : grokApiKey
                           ? 'Click "Refresh Roles" to fetch AI suggestions'
-                          : 'Add a Grok API key to get AI-suggested roles'
+                          : 'Add a Groq API key to get AI-suggested roles'
                     }
                   </p>
                   {aiError && <p className="text-red-400 text-sm mt-1">{aiError}</p>}
@@ -382,7 +473,7 @@ export default function App() {
                       : '✨ Refresh Roles'
                     }
                   </button>
-                  {roleList.length > 0 && (
+                  {allRoles.length > 0 && (
                     <button
                       onClick={copyAll}
                       className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-white transition-colors"
@@ -392,6 +483,61 @@ export default function App() {
                   )}
                 </div>
               </div>
+
+              {/* Company Intel */}
+              {(companyIntel[selectedCompany] || loadingIntel) && (
+                <div className={`mb-4 px-4 py-3 rounded-xl border text-sm leading-relaxed ${t.intel}`}>
+                  {loadingIntel && !companyIntel[selectedCompany]
+                    ? <span className="opacity-60">Loading company info...</span>
+                    : companyIntel[selectedCompany]
+                  }
+                </div>
+              )}
+
+              {/* Category Filter */}
+              {allRoles.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {CATEGORIES.filter(cat =>
+                    cat === 'All' || allRoles.some(r => r.category === cat)
+                  ).map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => setActiveCategory(cat)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                        activeCategory === cat ? t.filterActive : t.filterBtn
+                      }`}
+                    >
+                      {cat}
+                      {cat !== 'All' && (
+                        <span className="ml-1 opacity-60">
+                          {allRoles.filter(r => r.category === cat).length}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Custom Role Input */}
+              {selectedCompany && (
+                <div className="flex gap-2 mb-5">
+                  <input
+                    type="text"
+                    value={customRoleInput}
+                    onChange={e => setCustomRoleInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && addCustomRole()}
+                    placeholder="Add custom role (e.g. Platform Engineer)..."
+                    className={`flex-1 border rounded-lg px-3 py-2 text-sm ${t.input} focus:outline-none`}
+                  />
+                  <button
+                    onClick={addCustomRole}
+                    disabled={!customRoleInput.trim()}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded-lg text-sm font-medium text-white transition-colors"
+                  >
+                    Add
+                  </button>
+                </div>
+              )}
 
               {/* Loading Skeleton */}
               {loadingAI && (
@@ -407,9 +553,9 @@ export default function App() {
               )}
 
               {/* Role Cards Grid */}
-              {!loadingAI && roleList.length > 0 && (
+              {!loadingAI && visibleRoles.length > 0 && (
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {roleList.map((role) => {
+                  {visibleRoles.map(({ role, category, custom }) => {
                     const str = generateSearchString(selectedCompany, role)
                     const isCopied = copiedStr === str
                     return (
@@ -418,17 +564,45 @@ export default function App() {
                         className={`${t.codeCard} rounded-xl px-4 py-3 flex flex-col gap-1.5 border ${darkMode ? 'border-gray-700/50' : 'border-gray-200'}`}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className={`text-xs font-semibold ${t.subtext} uppercase tracking-wide truncate`}>
-                            {role}
-                          </span>
-                          <button
-                            onClick={() => copyToClipboard(str)}
-                            className={`shrink-0 px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                              isCopied ? 'bg-green-600 text-white' : t.copyBtn
-                            }`}
-                          >
-                            {isCopied ? '✓ Copied!' : 'Copy'}
-                          </button>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`text-xs font-semibold ${t.subtext} uppercase tracking-wide truncate`}>
+                              {role}
+                            </span>
+                            <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded ${
+                              category === 'Custom'
+                                ? darkMode ? 'bg-emerald-900/50 text-emerald-400' : 'bg-emerald-100 text-emerald-700'
+                                : darkMode ? 'bg-gray-700 text-gray-400' : 'bg-gray-200 text-gray-500'
+                            }`}>
+                              {category}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {custom && (
+                              <button
+                                onClick={() => removeCustomRole(selectedCompany, role)}
+                                className={`px-1.5 py-1 rounded text-xs transition-colors ${darkMode ? 'text-gray-500 hover:text-red-400' : 'text-gray-400 hover:text-red-500'}`}
+                                title="Remove"
+                              >
+                                ✕
+                              </button>
+                            )}
+                            <button
+                              onClick={() => copyToClipboard(str)}
+                              className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                                isCopied ? 'bg-green-600 text-white' : t.copyBtn
+                              }`}
+                            >
+                              {isCopied ? '✓' : 'Copy'}
+                            </button>
+                            <a
+                              href={linkedInUrl(selectedCompany, role)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-1 rounded-md text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                            >
+                              🔗
+                            </a>
+                          </div>
                         </div>
                         <code className={`text-xs font-mono ${t.codeText} break-all leading-relaxed`}>
                           {str}
@@ -439,12 +613,18 @@ export default function App() {
                 </div>
               )}
 
-              {!loadingAI && roleList.length === 0 && !aiError && (
+              {!loadingAI && visibleRoles.length === 0 && allRoles.length > 0 && (
+                <div className={`text-center py-10 ${t.subtext}`}>
+                  <p className="font-medium">No roles in this category</p>
+                </div>
+              )}
+
+              {!loadingAI && allRoles.length === 0 && !aiError && (
                 <div className={`text-center py-16 ${t.subtext}`}>
                   <p className="text-4xl mb-3">✨</p>
                   <p className="font-medium">No roles yet</p>
                   <p className="text-sm mt-1">
-                    {grokApiKey ? 'Click "Refresh Roles" to fetch AI suggestions' : 'Add a Grok API key to use AI suggestions'}
+                    {grokApiKey ? 'Click "Refresh Roles" to fetch AI suggestions' : 'Add a Groq API key to use AI suggestions'}
                   </p>
                 </div>
               )}
