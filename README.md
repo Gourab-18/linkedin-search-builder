@@ -87,3 +87,28 @@ Anyone doing active job searching who maintains a target company list and wants 
 
 All search strings follow the format LinkedIn actually supports:
 
+
+<img width="1470" height="803" alt="Screenshot 2026-06-04 at 7 52 31 AM" src="https://github.com/user-attachments/assets/1215018f-5165-4a84-a338-819aa63a1151" />
+
+<img width="1470" height="813" alt="Screenshot 2026-06-04 at 7 52 48 AM" src="https://github.com/user-attachments/assets/31416d51-8ee3-491d-b1b5-9618c9a4ab24" />
+
+
+<img width="687" height="82" alt="Screenshot 2026-06-04 at 7 53 01 AM" src="https://github.com/user-attachments/assets/df57ac47-5cf7-4ee2-9338-659250d53fc3" />
+
+<img width="592" height="75" alt="Screenshot 2026-06-04 at 7 53 11 AM" src="https://github.com/user-attachments/assets/43882845-e979-4ee3-8374-e5d6c6845867" />
+
+<img width="729" height="82" alt="Screenshot 2026-06-04 at 7 53 17 AM" src="https://github.com/user-attachments/assets/10941cc5-2ab7-4b37-8d5f-076a4fe3dffe" />
+
+<img width="280" height="123" alt="Screenshot 2026-06-04 at 7 53 24 AM" src="https://github.com/user-attachments/assets/90bbfdec-63c8-41e4-88a6-3fd6e5c5ed64" />
+
+<img width="326" height="159" alt="Screenshot 2026-06-04 at 7 53 32 AM" src="https://github.com/user-attachments/assets/568cd4c9-b416-4da1-9884-ff42d63b067b" />
+
+<img width="925" height="167" alt="Screenshot 2026-06-04 at 7 53 39 AM" src="https://github.com/user-attachments/assets/72be87d6-be72-4d0e-8767-0731a0009497" />
+
+
+
+
+
+
+
+
