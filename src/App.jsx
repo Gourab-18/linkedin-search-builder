@@ -1,5 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import Papa from 'papaparse'
+import * as pdfjsLib from 'pdfjs-dist'
+import mammoth from 'mammoth'
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.mjs',
+  import.meta.url
+).toString()
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -230,12 +237,36 @@ export default function App() {
 
   // ── Resume upload ───────────────────────────────────────────────────────────
 
+  const extractResumeText = async (file) => {
+    const ext = file.name.split('.').pop().toLowerCase()
+    if (ext === 'pdf') {
+      const arrayBuffer = await file.arrayBuffer()
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+      const pages = await Promise.all(
+        Array.from({ length: pdf.numPages }, (_, i) =>
+          pdf.getPage(i + 1).then(p => p.getTextContent()).then(tc =>
+            tc.items.map(item => item.str).join(' ')
+          )
+        )
+      )
+      return pages.join('\n')
+    }
+    if (ext === 'docx' || ext === 'doc') {
+      const arrayBuffer = await file.arrayBuffer()
+      const result = await mammoth.extractRawText({ arrayBuffer })
+      return result.value
+    }
+    // plain text fallback
+    return file.text()
+  }
+
   const handleResume = async (file) => {
     if (!file) return
     if (!grokApiKey) { showToast('Enter Groq API key first', 'error'); return }
     setLoadingResume(true)
     try {
-      const text = await file.text()
+      const text = await extractResumeText(file)
+      if (!text.trim()) throw new Error('No text found in file')
       const summary = await groqCall(RESUME_PARSE_PROMPT(text))
       setUserBackground(summary)
       showToast('Resume parsed — background updated!', 'success')
@@ -243,6 +274,7 @@ export default function App() {
       showToast(`Resume parse failed: ${err.message}`, 'error')
     } finally {
       setLoadingResume(false)
+      if (resumeInputRef.current) resumeInputRef.current.value = ''
     }
   }
 
