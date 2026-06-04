@@ -1,4 +1,4 @@
-# LinkedIn Search Builder
+# LinkedIn Search Builder ( https://linkedin-search-builder.vercel.app/ )
 
 A browser-based tool to supercharge your LinkedIn job search using a CSV of target companies.
 
